@@ -527,7 +527,7 @@ class PerhitunganGaji
 
                     $defaultColumns[] = [
                         //'label'    => $d->keterangan.' - '. $value .' hari kerja' . ' ' . (float)$presensi['hadir'] . ' ' . (float)$total_gaji_libur_nasional . ' ' . $saturday_bonus . ' ' . $sunday_bonus,
-                        'label'      => ($d->keterangan ?? 'Gaji Pokok') . " - $value hari kerja [H:{$presensi['hadir']}, Hol:$holiday_bonus, Sat:$saturday_bonus, Sun:$sunday_bonus, SunChk:$totalSundayCheckin]",
+                        'label'      => ($d->keterangan ?? 'Gaji Pokok') . ' - ' . $value . ' hari kerja',
                         'factor'     => '+',
                         'value'      => $value * (float)($d->nominal ?? 0),
                         'type'       => 'HARIAN',
@@ -1405,11 +1405,8 @@ class PerhitunganGaji
             $sundayDate = \Carbon::parse($sunTgl);
             
             // Tentukan range pengecekan: 
-            // Dari awal minggu (Senin) atau awal periode (mana yang lebih baru) sampai hari Sabtu sebelum Minggu
+            // Dari awal minggu (Senin) sampai hari Sabtu sebelum Minggu
             $startCheck = \Carbon::parse($weekStart);
-            if ($periodStart->gt($startCheck)) {
-                $startCheck = $periodStart->copy();
-            }
 
             // Logika Full Week: Cek apakah dari startCheck s/d hari Sabtu masuk semua
             $hasFullWeek = true;
@@ -1512,25 +1509,26 @@ class PerhitunganGaji
                     });
 
                     if ($holidayPresence) {
-                        // Logika Full Week: Cek kehadiran dari awal minggu (atau awal periode) sampai hari libur tersebut
-                        $startCheck = $startOfWeek->copy();
-                        if ($periodStart->gt($startCheck)) {
-                            $startCheck = $periodStart->copy();
-                        }
-
-                        $hasFullWeek = true;
-                        $tempDate = $startCheck->copy();
+                        // Logika Full Week: Karyawan wajib hadir di seluruh hari kerja aktif di pekan tersebut (Senin s/d Sabtu)
+                        $startOfWeek = \Carbon::parse($weekStart); // Senin
+                        $saturdayOfWeek = $startOfWeek->copy()->addDays(5); // Sabtu
                         
-                        // Pengecekan berurutan sampai H-1 hari libur
-                        while ($tempDate < $carbonHoliday) {
-                            if (!$allPresenceDates->contains($tempDate->format('Y-m-d'))) {
-                                $hasFullWeek = false;
-                                break;
+                        $hasFullWeek = true;
+                        $tempDate = $startOfWeek->copy();
+
+                        while ($tempDate <= $saturdayOfWeek) {
+                            $dateStr = $tempDate->format('Y-m-d');
+                            // Hari libur itu sendiri atau libur nasional lain tidak wajib hadir kerja normal
+                            if ($dateStr !== $holidayDate && !in_array($dateStr, $holidays)) {
+                                if (!$allPresenceDates->contains($dateStr)) {
+                                    $hasFullWeek = false;
+                                    break;
+                                }
                             }
                             $tempDate->addDay();
                         }
 
-                        // Jika syarat masuk terus terpenuhi dan ada jam kerja di hari libur
+                        // Jika syarat masuk seluruh hari kerja terpenuhi dan ada jam kerja valid di hari libur
                         if ($hasFullWeek) {
                             $holIn = is_array($holidayPresence) ? $holidayPresence['checkin_time'] : $holidayPresence->checkin_time;
                             $holOut = is_array($holidayPresence) ? $holidayPresence['checkout_time'] : $holidayPresence->checkout_time;
