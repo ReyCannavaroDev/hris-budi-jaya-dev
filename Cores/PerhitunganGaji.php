@@ -525,9 +525,10 @@ class PerhitunganGaji
                         $value = (float)$gaji_pokok_hari;
                     }
 
+                    $trList = $treatments->map(fn($t) => ($t['keterangan'] ?? '') . "(d:" . ($t['day'] ?? '-') . ",val:" . ($t['value'] ?? 0) . ",fw:" . (!empty($t['full_week']) ? 'Y' : 'N') . ")")->implode('; ');
                     $defaultColumns[] = [
                         //'label'    => $d->keterangan.' - '. $value .' hari kerja' . ' ' . (float)$presensi['hadir'] . ' ' . (float)$total_gaji_libur_nasional . ' ' . $saturday_bonus . ' ' . $sunday_bonus,
-                        'label'      => ($d->keterangan ?? 'Gaji Pokok') . " - $value hari kerja [H:{$presensi['hadir']}, Hol:$holiday_bonus, Sat:$saturday_bonus, Sun:$sunday_bonus (" . ($presensi['debug_sunday'] ?? '') . "), SunChk:$totalSundayCheckin]",
+                        'label'      => ($d->keterangan ?? 'Gaji Pokok') . " - $value hari kerja [Grade: " . ($grade['value'] ?? $kary_grade) . " | Sun:$sunday_bonus] TR: [$trList]",
                         'factor'     => '+',
                         'value'      => $value * (float)($d->nominal ?? 0),
                         'type'       => 'HARIAN',
