@@ -983,6 +983,7 @@ class PerhitunganGaji
                 $endOfWeek = $startOfWeek->copy()->endOfWeek(Carbon::SUNDAY);
 
                 $fullWeekData = presensi_absensi::where('default_user_id', $getUserId)
+                    ->where('status', 'ATTEND')
                     ->whereBetween('tanggal', [
                         $startOfWeek->format('Y-m-d'), 
                         $endOfWeek->format('Y-m-d')
@@ -1219,9 +1220,14 @@ class PerhitunganGaji
         $bonusFullWeek = ($grade === '1D') ? 0 : 0.5;
         $total = 0;
 
-        // Ambil semua tanggal unik yang ada di data absensi ini
-        $allPresenceDates = collect($getPresensi)->pluck('tanggal')->unique()->toArray();
-        // dd($allPresenceDates);
+        // Ambil data presensi yang statusnya benar-benar ATTEND
+        $attendPresensi = collect($getPresensi)->filter(function($r) {
+            $isAttend = ($r['status'] ?? '') === 'ATTEND' || (!empty($r['checkin_time']) && !empty($r['checkout_time']));
+            return $isAttend;
+        });
+
+        // Ambil semua tanggal unik yang ada di data absensi hadir ini
+        $allPresenceDates = $attendPresensi->pluck('tanggal')->unique()->toArray();
         
         if (empty($allPresenceDates)) return 0;
 
@@ -1229,10 +1235,20 @@ class PerhitunganGaji
         $periodStart = $allDates->min();
         $periodEnd = $allDates->max();
 
-        $weeks = collect($getPresensi)->groupBy(function ($item) {
+        $weeks = $attendPresensi->groupBy(function ($item) {
             return \Carbon::parse($item['tanggal'])->startOfWeek(\Carbon::MONDAY)->format('Y-m-d');
         });
         foreach ($weeks as $weekStart => $records) {
+            // Cari data Sabtu yang hadir
+            $saturday = collect($records)->first(function($r) {
+                return \Carbon::parse($r['tanggal'])->dayOfWeek === 6 &&
+                       !empty($r['checkin_time']) && !empty($r['checkout_time']);
+            });
+
+            if (!$saturday) {
+                continue;
+            }
+
             $startOfWeek = \Carbon::parse($weekStart);
             $endOfWeek = $startOfWeek->copy()->endOfWeek(\Carbon::SUNDAY);
 
@@ -1256,20 +1272,15 @@ class PerhitunganGaji
             // Cek apakah semua tanggal yang diharapkan ada di data hadir
             $hasFullWeek = collect($expectedDates)->every(fn($date) => in_array($date, $actualDates));
 
-            // Cari data Sabtu
-            $saturday = collect($records)->first(fn($r) => \Carbon::parse($r['tanggal'])->dayOfWeek === 6);
+            $checkIn = \Carbon::parse($saturday['checkin_time']);
+            $checkOut = \Carbon::parse($saturday['checkout_time']);
+            
+            // Gunakan absolute difference agar tidak minus
+            $durationMinutes = $checkOut->diffInMinutes($checkIn);
 
-            if ($saturday && $saturday['checkin_time'] && $saturday['checkout_time']) {
-                $checkIn = \Carbon::parse($saturday['checkin_time']);
-                $checkOut = \Carbon::parse($saturday['checkout_time']);
-                
-                // Gunakan absolute difference agar tidak minus
-                $durationMinutes = $checkOut->diffInMinutes($checkIn);
-
-                // 10 jam = 600 menit. Toleransi 10 menit = 590 menit.
-                if ($durationMinutes >= 590) {
-                    $total += $hasFullWeek ? $bonusFullWeek : 0;
-                }
+            // 10 jam = 600 menit. Toleransi 10 menit = 590 menit.
+            if ($durationMinutes >= 590) {
+                $total += $hasFullWeek ? $bonusFullWeek : 0;
             }
         }
         return $total;
@@ -1334,54 +1345,68 @@ class PerhitunganGaji
         $bonusValue = $gradeBonus[$grade] ?? 0;
         if ($bonusValue <= 0) return 0;
 
+        // Ambil data presensi yang statusnya benar-benar ATTEND
+        $attendPresensi = collect($getPresensi)->filter(function($r) {
+            $isAttend = ($r['status'] ?? '') === 'ATTEND' || (!empty($r['checkin_time']) && !empty($r['checkout_time']));
+            return $isAttend;
+        });
+
         // Ambil semua tanggal unik yang hadir di periode ini
-        $allPresenceDates = collect($getPresensi)
+        $allPresenceDates = $attendPresensi
             ->map(fn($r) => \Carbon::parse($r['tanggal'])->format('Y-m-d'))
             ->unique();
 
+        if ($allPresenceDates->isEmpty()) return 0;
 
         $periodStart = \Carbon::parse($allPresenceDates->min());
 
         // Grouping berdasarkan minggu
-        $weeks = collect($getPresensi)->groupBy(function ($item) {
+        $weeks = $attendPresensi->groupBy(function ($item) {
             return \Carbon::parse($item['tanggal'])->startOfWeek(\Carbon::MONDAY)->format('Y-m-d');
         });
 
         $total = 0;
 
         foreach ($weeks as $weekStart => $records) {
-            // Cari data hari Minggu di minggu ini
-            $sunday = collect($records)->first(fn($r) => \Carbon::parse($r['tanggal'])->dayOfWeek === 0);
+            // Cari data hari Minggu di minggu ini yang hadir
+            $sunday = collect($records)->first(function($r) {
+                return \Carbon::parse($r['tanggal'])->dayOfWeek === 0 &&
+                       !empty($r['checkin_time']) && !empty($r['checkout_time']);
+            });
 
-            if ($sunday) {
-                $sundayDate = \Carbon::parse($sunday['tanggal']);
-                
-                // Tentukan range pengecekan: 
-                // Dari awal minggu (Senin) atau awal periode (mana yang lebih baru) sampai hari Minggu tersebut
-                $startCheck = \Carbon::parse($weekStart);
-                if ($periodStart->gt($startCheck)) {
-                    $startCheck = $periodStart->copy();
+            // JIKA HARI MINGGU TIDAK MASUK/LIBUR -> TIDAK DAPAT BONUS MINGGU
+            if (!$sunday) {
+                continue;
+            }
+
+            $sundayDate = \Carbon::parse($sunday['tanggal']);
+            
+            // Tentukan range pengecekan: 
+            // Dari awal minggu (Senin) atau awal periode (mana yang lebih baru) sampai hari Sabtu sebelum Minggu
+            $startCheck = \Carbon::parse($weekStart);
+            if ($periodStart->gt($startCheck)) {
+                $startCheck = $periodStart->copy();
+            }
+
+            // Logika Full Week: Cek apakah dari startCheck s/d hari Sabtu masuk semua
+            $hasFullWeek = true;
+            $tempDate = $startCheck->copy();
+            $saturdayDate = $sundayDate->copy()->subDay();
+            while ($tempDate <= $saturdayDate) {
+                if (!$allPresenceDates->contains($tempDate->format('Y-m-d'))) {
+                    $hasFullWeek = false;
+                    break;
                 }
+                $tempDate->addDay();
+            }
 
-                // Logika Full Week: Cek apakah dari startCheck s/d hari Minggu masuk semua
-                $hasFullWeek = true;
-                $tempDate = $startCheck->copy();
-                while ($tempDate <= $sundayDate) {
-                    if (!$allPresenceDates->contains($tempDate->format('Y-m-d'))) {
-                        $hasFullWeek = false;
-                        break;
-                    }
-                    $tempDate->addDay();
-                }
+            // Jika Full Week terpenuhi, cek durasi/kehadiran hari Minggu tersebut
+            if ($hasFullWeek) {
+                $checkIn = \Carbon::parse($sunday['checkin_time']);
+                $checkOut = \Carbon::parse($sunday['checkout_time']);
 
-                // Jika Full Week terpenuhi, cek durasi/kehadiran hari Minggu tersebut
-                if ($hasFullWeek) {
-                    $checkIn = \Carbon::parse($sunday['checkin_time']);
-                    $checkOut = \Carbon::parse($sunday['checkout_time']);
-
-                    if ($checkOut->gt($checkIn)) {
-                        $total += $bonusValue;
-                    }
+                if ($checkOut->gt($checkIn)) {
+                    $total += $bonusValue;
                 }
             }
         }
@@ -1406,9 +1431,14 @@ class PerhitunganGaji
         $bonusValue = $gradeBonus[$grade] ?? 0;
         if ($bonusValue <= 0) return 0;
 
-        // 2. Ambil data Libur Nasional (Asumsi Anda memanggil model m_libur_nasional)
-        // Sebaiknya filter berdasarkan range periode gaji agar performa terjaga
-        $allPresenceDates = collect($getPresensi)
+        // Ambil data presensi yang statusnya benar-benar ATTEND
+        $attendPresensi = collect($getPresensi)->filter(function($r) {
+            $isAttend = ($r['status'] ?? '') === 'ATTEND' || (!empty($r['checkin_time']) && !empty($r['checkout_time']));
+            return $isAttend;
+        });
+
+        // 2. Ambil data Libur Nasional (filter berdasarkan tanggal hadir dan status is_active)
+        $allPresenceDates = $attendPresensi
             ->map(fn($r) => \Carbon::parse($r['tanggal'])->format('Y-m-d'))
             ->unique();
 
@@ -1418,6 +1448,7 @@ class PerhitunganGaji
         $periodEnd   = \Carbon::parse($allPresenceDates->max());
 
         $holidays = \DB::table('m_libur_nasional')
+            ->where('is_active', true)
             ->whereBetween('tanggal', [$periodStart->format('Y-m-d'), $periodEnd->format('Y-m-d')])
             ->pluck('tanggal')
             ->toArray();
@@ -1425,7 +1456,7 @@ class PerhitunganGaji
         if (empty($holidays)) return 0;
 
         // 3. Grouping presensi berdasarkan minggu (Senin - Minggu)
-        $weeks = collect($getPresensi)->groupBy(function ($item) {
+        $weeks = $attendPresensi->groupBy(function ($item) {
             return \Carbon::parse($item['tanggal'])->startOfWeek(\Carbon::MONDAY)->format('Y-m-d');
         });
 
@@ -1443,8 +1474,10 @@ class PerhitunganGaji
 
                 if ($carbonHoliday->between($startOfWeek, $endOfWeek)) {
                     
-                    // Cari data kehadiran user di hari libur tersebut
-                    $holidayPresence = $presenceInWeek->first(fn($r) => $r['tanggal'] == $holidayDate);
+                    // Cari data kehadiran user di hari libur tersebut (wajib ada checkin/checkout)
+                    $holidayPresence = $presenceInWeek->first(function($r) use ($holidayDate) {
+                        return $r['tanggal'] == $holidayDate && !empty($r['checkin_time']) && !empty($r['checkout_time']);
+                    });
 
                     if ($holidayPresence) {
                         // Logika Full Week: Cek kehadiran dari awal minggu (atau awal periode) sampai hari libur tersebut
@@ -1456,8 +1489,8 @@ class PerhitunganGaji
                         $hasFullWeek = true;
                         $tempDate = $startCheck->copy();
                         
-                        // Pengecekan berurutan sampai H-1 hari libur (atau sampai hari libur itu sendiri)
-                        while ($tempDate <= $carbonHoliday) {
+                        // Pengecekan berurutan sampai H-1 hari libur
+                        while ($tempDate < $carbonHoliday) {
                             if (!$allPresenceDates->contains($tempDate->format('Y-m-d'))) {
                                 $hasFullWeek = false;
                                 break;
