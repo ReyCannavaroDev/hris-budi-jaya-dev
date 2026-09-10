@@ -527,7 +527,7 @@ class PerhitunganGaji
 
                     $defaultColumns[] = [
                         //'label'    => $d->keterangan.' - '. $value .' hari kerja' . ' ' . (float)$presensi['hadir'] . ' ' . (float)$total_gaji_libur_nasional . ' ' . $saturday_bonus . ' ' . $sunday_bonus,
-                        'label'      => ($d->keterangan ?? 'Gaji Pokok') . ' - ' . $value . ' hari kerja',
+                        'label'      => ($d->keterangan ?? 'Gaji Pokok') . " - $value hari kerja [H:{$presensi['hadir']}, Hol:$holiday_bonus, Sat:$saturday_bonus, Sun:$sunday_bonus, SunChk:$totalSundayCheckin]",
                         'factor'     => '+',
                         'value'      => $value * (float)($d->nominal ?? 0),
                         'type'       => 'HARIAN',
