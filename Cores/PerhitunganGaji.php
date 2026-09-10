@@ -527,7 +527,7 @@ class PerhitunganGaji
 
                     $defaultColumns[] = [
                         //'label'    => $d->keterangan.' - '. $value .' hari kerja' . ' ' . (float)$presensi['hadir'] . ' ' . (float)$total_gaji_libur_nasional . ' ' . $saturday_bonus . ' ' . $sunday_bonus,
-                        'label'      => ($d->keterangan ?? 'Gaji Pokok') . " - $value hari kerja [H:{$presensi['hadir']}, Hol:$holiday_bonus, Sat:$saturday_bonus, Sun:$sunday_bonus, SunChk:$totalSundayCheckin]",
+                        'label'      => ($d->keterangan ?? 'Gaji Pokok') . " - $value hari kerja [H:{$presensi['hadir']}, Hol:$holiday_bonus, Sat:$saturday_bonus, Sun:$sunday_bonus (" . ($presensi['debug_sunday'] ?? '') . "), SunChk:$totalSundayCheckin]",
                         'factor'     => '+',
                         'value'      => $value * (float)($d->nominal ?? 0),
                         'type'       => 'HARIAN',
@@ -1026,7 +1026,8 @@ class PerhitunganGaji
             "saturday_7_5_fullweek" => $saturday_7_5_fullweek,
             "countFullWeek" => $collectFullweek->count(),
             "saturday_bonus_new" => $saturdayNew,
-            "sunday_bonus_new" => $sundayNew,
+            "sunday_bonus_new" => $sundayNew['total'] ?? 0,
+            "debug_sunday" => $sundayNew['debug'] ?? '',
             "holiday_bonus_new" => $holidayNew,
         ];
     }
@@ -1429,11 +1430,15 @@ class PerhitunganGaji
 
                 if ($checkOut->gt($checkIn)) {
                     $total += $bonusValue;
+                    $debugSun[] = "$sunTgl in:$sunIn out:$sunOut";
                 }
             }
         }
 
-        return $total;
+        return [
+            'total' => $total,
+            'debug' => implode('; ', $debugSun ?? [])
+        ];
     }
 
     private function holiday_fullweek_bonus($getPresensi, $grade)
