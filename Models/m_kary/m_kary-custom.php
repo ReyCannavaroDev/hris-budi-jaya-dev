@@ -327,19 +327,35 @@ class m_kary extends \App\Models\BasicModels\m_kary
             "npwp_foto"    => null,
             "npwp_tgl_berlaku" => null,
             "bpjs_tipe_id" => null,
+            "bpjs_tipe"    => null,
             "bpjs_no"  => null,
             "bpjs_no_kesehatan"  => null,
             "bpjs_no_ketenagakerjaan"  => null,
             "bpjs_foto"    => null,
             "berkas_lain"  => null,
-            "desc_file"    => null
+            "desc_file"    => null,
+            "periode_gaji" => null,
+            "metode"       => null,
+            "metode_id"    => null,
+            "tipe"         => null,
+            "tipe_id"      => null,
+            "bank"         => null,
+            "bank_id"      => null,
+            "no_rek"       => null,
+            "atas_nama_rek"=> null
         ];
     }
 
     public function custom_data_diri($req)
     {
-        $id_kary = default_users::find(auth()->user()->id)->m_kary_id;
-        $data = [];
+        $user = default_users::find(auth()->user()->id ?? 0);
+        $id_kary = $user->m_kary_id ?? null;
+
+        if (!$id_kary) {
+            $data = $this->defaultDataDiri();
+            return $this->helper->customResponse('OK', 200, $data);
+        }
+
         $data = m_kary::selectRaw("
                 m_kary.*,
                 dir.nama dir,
@@ -347,7 +363,6 @@ class m_kary extends \App\Models\BasicModels\m_kary
                 dp.nama dept,
                 z.nama zona,
                 g.value grading,
-                z.nama zona,
                 p.desc_kerja posisi,
                 j.desc jam_kerja,
                 jk.value jk,
@@ -377,42 +392,58 @@ class m_kary extends \App\Models\BasicModels\m_kary
             ->leftJoin('m_general as status_nikah','status_nikah.id','m_kary.status_nikah_id')
             ->leftJoin('m_general as tanggungan','tanggungan.id','m_kary.tanggungan_id')
             ->leftJoin('m_general as costcontre','costcontre.id','m_kary.costcontre_id')
-            ->where('m_kary.id',$id_kary)->first();
-        if(!$data){
+            ->where('m_kary.id', $id_kary)
+            ->first();
+
+        if (!$data) {
             $data = $this->defaultDataDiri();
-        }else{
-            $det_kartu = m_kary_det_kartu::with(['bpjs_tipe'])->where('m_kary_id', @$id_kary ?? 0)->first();
-            $det_pemb = m_kary_det_pemb::with(['periode_gaji', 'metode', 'tipe' , 'bank'])->where('m_kary_id', @$id_kary ?? 0)->first();
-            if($det_kartu){
-                $data['ktp_no'] = $det_kartu->ktp_no ?? null;
-                $data['ktp_foto'] = $det_kartu->ktp_foto ?? null;
-                $data['pas_foto'] = $det_kartu->pas_foto ?? null;
-                $data['kk_no'] = $det_kartu->kk_no ?? null;
-                $data['kk_foto'] = $det_kartu->kk_foto ?? null;
-                $data['npwp_no'] = $det_kartu->npwp_no ?? null;
-                $data['npwp_foto'] = $det_kartu->npwp_foto ?? null;
-                $data['npwp_tgl_berlaku'] = $det_kartu->npwp_tgl_berlaku ?? null;
-                $data['bpjs_tipe'] = $det_kartu->bpjs_tipe->value ?? null;
-                $data['bpjs_tipe_id'] = $det_kartu->bpjs_tipe_id ?? null;
-                $data['bpjs_no'] = $det_kartu->bpjs_no ?? null;
-                $data['bpjs_no_kesehatan'] = $det_kartu->bpjs_no_kesehatan ?? null;
-                $data['bpjs_no_ketenagakerjaan'] = $det_kartu->bpjs_no_ketenagakerjaan ?? null;
-                $data['bpjs_foto'] = $det_kartu->bpjs_foto ?? null;
-                $data['berkas_lain'] = $det_kartu->berkas_lain ?? null;
-                $data['desc_file'] = $det_kartu->desc_file ?? null;
-                $data['periode_gaji_id'] = $det_pemb->periode_gaji->id ?? null;
-                $data['periode_gaji'] = $det_pemb->periode_gaji->value ?? null;
-                $data['metode'] = $det_pemb->metode->value ?? null;
-                $data['metode_id'] = $det_pemb->metode->id ?? null;
-                $data['tipe'] = $det_pemb->tipe->value ?? null;
-                $data['tipe_id'] = $det_pemb->tipe->id ?? null;
-                $data['bank'] = $det_pemb->bank->value ?? null;
-                $data['bank_id'] = $det_pemb->bank->id ?? null;
-                $data['no_rek'] = $det_pemb->no_rek ?? null;
-                $data['atas_nama_rek'] = $det_pemb->atas_nama_rek ?? null;
-                
-            }
+            return $this->helper->customResponse('OK', 200, $data);
         }
+
+        // Ambil data kartu secara independen
+        try {
+            $det_kartu = m_kary_det_kartu::with(['bpjs_tipe'])->where('m_kary_id', $id_kary)->first();
+        } catch (\Exception $e) {
+            $det_kartu = null;
+        }
+
+        // Ambil data pembayaran secara independen
+        try {
+            $det_pemb = m_kary_det_pemb::with(['periode_gaji', 'metode', 'tipe', 'bank'])->where('m_kary_id', $id_kary)->first();
+        } catch (\Exception $e) {
+            $det_pemb = null;
+        }
+
+        // Mapping Data Kartu (selalu ada key-nya di JSON)
+        $data['ktp_no']                  = $det_kartu->ktp_no ?? null;
+        $data['ktp_foto']                = $det_kartu->ktp_foto ?? null;
+        $data['pas_foto']                = $det_kartu->pas_foto ?? null;
+        $data['kk_no']                   = $det_kartu->kk_no ?? null;
+        $data['kk_foto']                 = $det_kartu->kk_foto ?? null;
+        $data['npwp_no']                 = $det_kartu->npwp_no ?? null;
+        $data['npwp_foto']               = $det_kartu->npwp_foto ?? null;
+        $data['npwp_tgl_berlaku']        = $det_kartu->npwp_tgl_berlaku ?? null;
+        $data['bpjs_tipe']               = @$det_kartu->bpjs_tipe->value ?? null;
+        $data['bpjs_tipe_id']            = $det_kartu->bpjs_tipe_id ?? null;
+        $data['bpjs_no']                 = $det_kartu->bpjs_no ?? null;
+        $data['bpjs_no_kesehatan']       = $det_kartu->bpjs_no_kesehatan ?? null;
+        $data['bpjs_no_ketenagakerjaan'] = $det_kartu->bpjs_no_ketenagakerjaan ?? null;
+        $data['bpjs_foto']               = $det_kartu->bpjs_foto ?? null;
+        $data['berkas_lain']             = $det_kartu->berkas_lain ?? null;
+        $data['desc_file']               = $det_kartu->desc_file ?? null;
+
+        // Mapping Data Pembayaran (terpisah dan aman dari null)
+        $data['periode_gaji_id']         = @$det_pemb->periode_gaji->id ?? null;
+        $data['periode_gaji']            = @$det_pemb->periode_gaji->value ?? null;
+        $data['metode']                  = @$det_pemb->metode->value ?? null;
+        $data['metode_id']               = @$det_pemb->metode->id ?? null;
+        $data['tipe']                    = @$det_pemb->tipe->value ?? null;
+        $data['tipe_id']                 = @$det_pemb->tipe->id ?? null;
+        $data['bank']                    = @$det_pemb->bank->value ?? null;
+        $data['bank_id']                 = @$det_pemb->bank->id ?? null;
+        $data['no_rek']                  = $det_pemb->no_rek ?? null;
+        $data['atas_nama_rek']           = $det_pemb->atas_nama_rek ?? null;
+
         return $this->helper->customResponse('OK', 200, $data);
     }
 

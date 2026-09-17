@@ -56,19 +56,30 @@ class default_users extends \App\Models\BasicModels\default_users
         }
         $object['atasan'] = m_kary::where('id',@$row['m_kary.atasan_id']??0)->pluck('nama_lengkap')->first();
 
-        if(app()->request->header('Source') === 'mobile'){
-            //$data = \DB::select("select public.employee_attendance(?,?)",[Date('Y-m-d'),$row['m_kary_id'] ??0]);
-            $data = \DB::select("select public.employee_attendance_fix_cuti(?,?) as employee_attendance",[Date('Y-m-d'),$row['m_kary_id'] ??0]);
+        if (app()->request->header('Source') === 'mobile') {
+            $object['m_kary.sisa_cuti_satu_hari'] = 0;
+            $object['m_kary.sisa_cuti_setengah_hari'] = 0;
+            $object['m_kary.cuti_satu_hari'] = 0;
+            $object['m_kary.cuti_setengah_hari'] = 0;
+            $object['info_cuti'] = null;
 
-            $data = json_decode($data[0]->employee_attendance);
-            $object['m_kary.sisa_cuti_satu_hari'] = $data->sisa_cuti_satu_hari ?? 0;
-            $object['m_kary.sisa_cuti_setengah_hari'] = $data->sisa_cuti_setengah_hari ?? 0;
-            $object['m_kary.cuti_satu_hari'] = $data->cuti_satu_hari ?? 0;
-            $object['m_kary.cuti_setengah_hari'] = $data->cuti_setengah_hari ?? 0;
-            $object['info_cuti'] = $data;
-            
+            if (!empty($row['m_kary_id'])) {
+                try {
+                    $data = \DB::select("select public.employee_attendance_fix_cuti(?,?) as employee_attendance", [Date('Y-m-d'), $row['m_kary_id']]);
+                    if (!empty($data) && isset($data[0]->employee_attendance)) {
+                        $infoCuti = json_decode($data[0]->employee_attendance);
+                        $object['m_kary.sisa_cuti_satu_hari'] = $infoCuti->sisa_cuti_satu_hari ?? 0;
+                        $object['m_kary.sisa_cuti_setengah_hari'] = $infoCuti->sisa_cuti_setengah_hari ?? 0;
+                        $object['m_kary.cuti_satu_hari'] = $infoCuti->cuti_satu_hari ?? 0;
+                        $object['m_kary.cuti_setengah_hari'] = $infoCuti->cuti_setengah_hari ?? 0;
+                        $object['info_cuti'] = $infoCuti;
+                    }
+                } catch (\Exception $e) {
+                    // Fail-safe jika fungsi database postgres error
+                }
+            }
         }
-        $object['profil_image'] = url('').'/'.$row['profil_image'];
+        $object['profil_image'] = !empty($row['profil_image']) ? url('').'/'.$row['profil_image'] : null;
         
         return array_merge( $row, $object );
     }
