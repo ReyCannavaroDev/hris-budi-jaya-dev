@@ -24,11 +24,11 @@ class presensi_absensi extends \App\Models\BasicModels\presensi_absensi
 
     public function onRetrieved($model)
     {
-        if (!preg_match('/^https?:\/\//i', $model->checkout_foto)) {
-        $model->checkout_foto = url('') . '/' . $model->checkout_foto;
+        if (!empty($model->checkout_foto) && !preg_match('/^https?:\/\//i', $model->checkout_foto)) {
+            $model->checkout_foto = url('') . '/' . $model->checkout_foto;
         }
 
-        if (!preg_match('/^https?:\/\//i', $model->checkin_foto)) {
+        if (!empty($model->checkin_foto) && !preg_match('/^https?:\/\//i', $model->checkin_foto)) {
             $model->checkin_foto = url('') . '/' . $model->checkin_foto;
         }
     }
@@ -392,7 +392,7 @@ class presensi_absensi extends \App\Models\BasicModels\presensi_absensi
                     ->where('created_at', '<=', $endTime)
                     ->where("default_user_id", auth()->user()->id)
                     ->where("status", "WORKING")->exists();
-                if ($check_exists_absen) 
+                if (!$check_not_exists_checkin) 
                     return $this->helper->customResponse("Anda belum checkin hari ini", 422);
             } else {
                 $check_exists_absen = $this->where("tanggal", date("Y-m-d"))
@@ -405,7 +405,7 @@ class presensi_absensi extends \App\Models\BasicModels\presensi_absensi
                 $check_not_exists_checkin = $this->where("tanggal", date("Y-m-d"))
                     ->where("default_user_id", auth()->user()->id)
                     ->where("status", "WORKING")->exists();
-                if ($check_exists_absen) 
+                if (!$check_not_exists_checkin) 
                     return $this->helper->customResponse("Anda belum checkin hari ini", 422);
             }
 
@@ -580,9 +580,9 @@ class presensi_absensi extends \App\Models\BasicModels\presensi_absensi
     public function custom_status_jadwal_kerja(){
         $karyId = auth()->user()->m_kary_id ?? null;
         if (!$karyId) {
-            return [
+            return $this->helper->customResponse('OK', 200, [
                 'status' => "NOT WORKING HOURS"
-            ];
+            ]);
         }
         $getTodayNum = Carbon::today()->dayOfWeek;
         $startOfWeek = Carbon::today()->startOfWeek();
@@ -603,9 +603,9 @@ class presensi_absensi extends \App\Models\BasicModels\presensi_absensi
             ]);
 
             if($t_jadwal_kerja_det->isEmpty()){
-                return [
+                return $this->helper->customResponse('OK', 200, [
                     'status' => "NOT WORKING HOURS"
-                ];
+                ]);
             }
 
             $t_jadwal_kerja_det = $t_jadwal_kerja_det->transform(function ($item){
@@ -624,9 +624,9 @@ class presensi_absensi extends \App\Models\BasicModels\presensi_absensi
 
             $count = $t_jadwal_kerja_det->count() - 1;
             if ($count < 0) {
-                return [
+                return $this->helper->customResponse('OK', 200, [
                     'status' => "NOT WORKING HOURS"
-                ];
+                ]);
             }
 
             $startDayBeforeWeekend = $t_jadwal_kerja_det[$count]['start_work'];
@@ -656,11 +656,11 @@ class presensi_absensi extends \App\Models\BasicModels\presensi_absensi
                     'status' => "NOT WORKING HOURS" 
                 ];
             }
-            return $data;
+            return $this->helper->customResponse('OK', 200, $data);
         } catch (\Exception $e) {
-            return [
+            return $this->helper->customResponse('OK', 200, [
                 'status' => "NOT WORKING HOURS"
-            ];
+            ]);
         }
     }
 
@@ -675,36 +675,41 @@ class presensi_absensi extends \App\Models\BasicModels\presensi_absensi
     public function custom_get_absen($req)
     {
         $periode = ($req->periode ?? date('Y-m')).'-1';
-        $m_kary_id = auth()->user()->m_kary_id;
+        $m_kary_id = auth()->user()->m_kary_id ?? 0;
 
-        $data = \DB::select("
-            select * from employee_attendance_detail(?, ?);
-        ", [$periode,$m_kary_id ?? 0]);
+        try {
+            $data = \DB::select("
+                select * from employee_attendance_detail(?, ?);
+            ", [$periode, $m_kary_id]);
 
-        // transform object for mobile
-        foreach($data as $dt){
-            $dt->status = @json_decode($dt->absensi)->status ?? null;
-            $dt->tanggal = @json_decode($dt->absensi)->tanggal ?? null;
-            $dt->catatan_in = @json_decode($dt->absensi)->catatan_in ?? null;
-            $dt->catatan_out = @json_decode($dt->absensi)->catatan_out ?? null;
-            $dt->checkin_lat = @json_decode($dt->absensi)->checkin_lat ?? null;
-            $dt->checkin_foto = ($inPic=@json_decode($dt->absensi)->checkin_foto) ? (str_contains($inPic,'http')?$inPic:url($inPic)) : null;
-            $dt->checkin_long = @json_decode($dt->absensi)->checkin_long ?? null;
-            $dt->checkin_time = @json_decode($dt->absensi)->checkin_time ?? null;
-            $dt->checkout_lat = @json_decode($dt->absensi)->checkout_lat ?? null;
-            $dt->checkout_foto = ($outPic=@json_decode($dt->absensi)->checkout_foto) ? (str_contains($outPic,'http')?$outPic:url($outPic)) : null;
-            $dt->checkout_long = @json_decode($dt->absensi)->checkout_long ?? null;
-            $dt->checkout_time = @json_decode($dt->absensi)->checkout_time ?? null;
-            $dt->checkin_region = @json_decode($dt->absensi)->checkin_region ?? null;
-            $dt->checkin_address = @json_decode($dt->absensi)->checkin_address ?? null;
-            $dt->checkout_region = @json_decode($dt->absensi)->checkout_region ?? null;
-            $dt->checkin_on_scope = @json_decode($dt->absensi)->checkin_on_scope ?? null;
-            $dt->checkout_address = @json_decode($dt->absensi)->checkout_address ?? null;
-            $dt->checkout_on_scope = @json_decode($dt->absensi)->checkout_on_scope ?? null;
-            $dt->presensi_absensi_id = @json_decode($dt->absensi)->presensi_absensi_id ?? null;
+            // transform object for mobile
+            foreach($data as $dt){
+                $absensi = is_string(@$dt->absensi) ? json_decode($dt->absensi) : (object)(@$dt->absensi ?? []);
+                $dt->status = @$absensi->status ?? 'NOT ATTEND';
+                $dt->tanggal = @$absensi->tanggal ?? null;
+                $dt->catatan_in = @$absensi->catatan_in ?? null;
+                $dt->catatan_out = @$absensi->catatan_out ?? null;
+                $dt->checkin_lat = @$absensi->checkin_lat ?? null;
+                $dt->checkin_foto = ($inPic=@$absensi->checkin_foto) ? (str_contains($inPic,'http')?$inPic:url($inPic)) : null;
+                $dt->checkin_long = @$absensi->checkin_long ?? null;
+                $dt->checkin_time = @$absensi->checkin_time ?? null;
+                $dt->checkout_lat = @$absensi->checkout_lat ?? null;
+                $dt->checkout_foto = ($outPic=@$absensi->checkout_foto) ? (str_contains($outPic,'http')?$outPic:url($outPic)) : null;
+                $dt->checkout_long = @$absensi->checkout_long ?? null;
+                $dt->checkout_time = @$absensi->checkout_time ?? null;
+                $dt->checkin_region = @$absensi->checkin_region ?? null;
+                $dt->checkin_address = @$absensi->checkin_address ?? null;
+                $dt->checkout_region = @$absensi->checkout_region ?? null;
+                $dt->checkin_on_scope = @$absensi->checkin_on_scope ?? false;
+                $dt->checkout_address = @$absensi->checkout_address ?? null;
+                $dt->checkout_on_scope = @$absensi->checkout_on_scope ?? false;
+                $dt->presensi_absensi_id = @$absensi->presensi_absensi_id ?? null;
+            }
+
+            return $this->helper->customResponse("OK", 200, $data);
+        } catch (\Exception $e) {
+            return $this->helper->customResponse("OK", 200, []);
         }
-
-        return $this->helper->customResponse("OK", 200, $data);
     }
 
 
