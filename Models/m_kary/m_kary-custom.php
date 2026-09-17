@@ -45,22 +45,40 @@ class m_kary extends \App\Models\BasicModels\m_kary
     {
         $object = [];
         if(app()->request->detail){
-            $data = \DB::select("select public.employee_attendance_fix_cuti(?,?) as employee_attendance",[Date('Y-m-d'),$row['id'] ??0]);
-            //$data = \DB::select("select public.employee_attendance(?,?) as employee_attendance",[Date('Y-m-d'),$row['id'] ??0]);
+            try {
+                $data = \DB::select("select public.employee_attendance_fix_cuti(?,?) as employee_attendance",[Date('Y-m-d'),$row['id'] ?? 0]);
+                if (!empty($data) && isset($data[0]->employee_attendance)) {
+                    $object['info_cuti'] = json_decode($data[0]->employee_attendance);
+                } else {
+                    $object['info_cuti'] = null;
+                }
+            } catch (\Exception $e) {
+                $object['info_cuti'] = null;
+            }
 
-            $data = json_decode($data[0]->employee_attendance);
-            $object['info_cuti'] = $data;
-
-            $jadwal_kerja = \DB::table('t_jadwal_kerja as t')->selectRaw("t.*")->join('m_general as g','g.id','t.tipe_jam_kerja_id')->where('t.tipe_jam_kerja_id', $row['tipe_jam_kerja_id'])
-                ->where('status','POSTED')->first();
-            $object['jadwal_kerja'] = $jadwal_kerja;
+            try {
+                $jadwal_kerja = \DB::table('t_jadwal_kerja as t')
+                    ->selectRaw("t.*")
+                    ->join('m_general as g','g.id','t.tipe_jam_kerja_id')
+                    ->where('t.tipe_jam_kerja_id', $row['tipe_jam_kerja_id'] ?? 0)
+                    ->where('status','POSTED')
+                    ->first();
+                $object['jadwal_kerja'] = $jadwal_kerja;
+            } catch (\Exception $e) {
+                $object['jadwal_kerja'] = null;
+            }
         }
         $object['nomor_ktp'] = \DB::table('m_kary_det_kartu')->where('m_kary_id', $row['id'] ?? 0)->value('ktp_no') ?? null ;
 
         if(app()->request->view_gaji){
-            $gaji = t_kary_salary::where('m_kary_id', $row['id'])->where('is_active', true)->first();
-            $object['gaji'] = @$gaji->total;
-            $object['gaji_last_updated_at'] = @$gaji->updated_at;
+            try {
+                $gaji = t_kary_salary::where('m_kary_id', $row['id'])->where('is_active', true)->first();
+                $object['gaji'] = @$gaji->total;
+                $object['gaji_last_updated_at'] = @$gaji->updated_at;
+            } catch (\Exception $e) {
+                $object['gaji'] = null;
+                $object['gaji_last_updated_at'] = null;
+            }
         }
 
         return array_merge( $row, $object );
@@ -342,7 +360,13 @@ class m_kary extends \App\Models\BasicModels\m_kary
             "bank"         => null,
             "bank_id"      => null,
             "no_rek"       => null,
-            "atas_nama_rek"=> null
+            "atas_nama_rek"=> null,
+            "username"     => null,
+            "name"         => null,
+            "email"        => null,
+            "user_id"      => null,
+            "default_user_id" => null,
+            "profil_image" => null
         ];
     }
 
@@ -443,6 +467,14 @@ class m_kary extends \App\Models\BasicModels\m_kary
         $data['bank_id']                 = @$det_pemb->bank->id ?? null;
         $data['no_rek']                  = $det_pemb->no_rek ?? null;
         $data['atas_nama_rek']           = $det_pemb->atas_nama_rek ?? null;
+
+        // Mapping User Identity (Username, Name, Email, Foto)
+        $data['username']                = $user->username ?? $data->kode ?? null;
+        $data['name']                    = $user->name ?? $data->nama_lengkap ?? null;
+        $data['email']                   = $user->email ?? $data->email ?? null;
+        $data['default_user_id']         = $user->id ?? null;
+        $data['user_id']                 = $user->id ?? null;
+        $data['profil_image']            = !empty($user->profil_image) ? url('').'/'.$user->profil_image : null;
 
         return $this->helper->customResponse('OK', 200, $data);
     }
