@@ -578,72 +578,90 @@ class presensi_absensi extends \App\Models\BasicModels\presensi_absensi
 
     //jika terikat dengan jadwal
     public function custom_status_jadwal_kerja(){
-        $karyId = auth()->user()->m_kary_id;
+        $karyId = auth()->user()->m_kary_id ?? null;
+        if (!$karyId) {
+            return [
+                'status' => "NOT WORKING HOURS"
+            ];
+        }
         $getTodayNum = Carbon::today()->dayOfWeek;
         $startOfWeek = Carbon::today()->startOfWeek();
         $endOfweek = Carbon::today()->endOfweek();
         $now = Carbon::now();
 
-        $t_jadwal_kerja_det = t_jadwal_kerja_det::where('m_kary_id',$karyId)->whereHas('t_jadwal_kerja', function($query){
-            $query->where('status','POSTED');
-        })->whereHas('t_jadwal_kerja_det_hari',function($query) {
-            $query->whereIn('day_num',range(1,7));
-        })->with(['t_jadwal_kerja_det_hari.m_jam_kerja' => function($select){
-            $select->select('id','m_jam_kerja.is_hari_berikutnya');
-        }])->with(['t_jadwal_kerja' => function($select){
-            $select->select('id','keterangan');
-        }])->get([
-            'id','m_kary_id','t_jadwal_kerja_det_hari_id','t_jadwal_kerja_id'
-        ]);
+        try {
+            $t_jadwal_kerja_det = t_jadwal_kerja_det::where('m_kary_id',$karyId)->whereHas('t_jadwal_kerja', function($query){
+                $query->where('status','POSTED');
+            })->whereHas('t_jadwal_kerja_det_hari',function($query) {
+                $query->whereIn('day_num',range(1,7));
+            })->with(['t_jadwal_kerja_det_hari.m_jam_kerja' => function($select){
+                $select->select('id','m_jam_kerja.is_hari_berikutnya');
+            }])->with(['t_jadwal_kerja' => function($select){
+                $select->select('id','keterangan');
+            }])->get([
+                'id','m_kary_id','t_jadwal_kerja_det_hari_id','t_jadwal_kerja_id'
+            ]);
 
-        if($t_jadwal_kerja_det->isEmpty()){
-            trigger_error('Jadwal Belum Diset');
-        }
+            if($t_jadwal_kerja_det->isEmpty()){
+                return [
+                    'status' => "NOT WORKING HOURS"
+                ];
+            }
 
-        $t_jadwal_kerja_det = $t_jadwal_kerja_det->transform(function ($item){
-            $tanggal = Carbon::today()->startOfWeek()->addDays($item->t_jadwal_kerja_det_hari->day_num - 1)->toDateString();
-            $item->t_jadwal_kerja_det_hari->tanggal = $tanggal;
-            $waktu_mulai = $item->t_jadwal_kerja_det_hari->waktu_mulai;
-            $waktu_akhir = $item->t_jadwal_kerja_det_hari->waktu_akhir;
-            $item->start_work = Carbon::parse("$tanggal $waktu_mulai")->subHours(2)->toDateTimeString();
-             if (isset($item->t_jadwal_kerja_det_hari->m_jam_kerja) && $item->t_jadwal_kerja_det_hari->m_jam_kerja->is_hari_berikutnya) {
+            $t_jadwal_kerja_det = $t_jadwal_kerja_det->transform(function ($item){
+                $tanggal = Carbon::today()->startOfWeek()->addDays($item->t_jadwal_kerja_det_hari->day_num - 1)->toDateString();
+                $item->t_jadwal_kerja_det_hari->tanggal = $tanggal;
+                $waktu_mulai = $item->t_jadwal_kerja_det_hari->waktu_mulai;
+                $waktu_akhir = $item->t_jadwal_kerja_det_hari->waktu_akhir;
+                $item->start_work = Carbon::parse("$tanggal $waktu_mulai")->subHours(2)->toDateTimeString();
+                if (isset($item->t_jadwal_kerja_det_hari->m_jam_kerja) && $item->t_jadwal_kerja_det_hari->m_jam_kerja->is_hari_berikutnya) {
                     $item->end_work = Carbon::parse("$tanggal $waktu_akhir")->addDay()->addHours(2)->toDateTimeString();
                 } else {
                     $item->end_work = Carbon::parse("$tanggal $waktu_akhir")->toDateTimeString();
                 }
-            return $item;
-        });
+                return $item;
+            });
 
-        $count = $t_jadwal_kerja_det->count() - 1;
+            $count = $t_jadwal_kerja_det->count() - 1;
+            if ($count < 0) {
+                return [
+                    'status' => "NOT WORKING HOURS"
+                ];
+            }
 
-        $startDayBeforeWeekend = $t_jadwal_kerja_det[$count]['start_work'];
-        $EndDayBeforeWeekend = $t_jadwal_kerja_det[$count]['end_work'];
+            $startDayBeforeWeekend = $t_jadwal_kerja_det[$count]['start_work'];
+            $EndDayBeforeWeekend = $t_jadwal_kerja_det[$count]['end_work'];
 
-        $day_before = [
-        "start_work" => Carbon::parse($startDayBeforeWeekend)->subWeek()->toDateTimeString(),
-        "end_work" => Carbon::parse($EndDayBeforeWeekend)->subWeek()->toDateTimeString(),
-        ];
-
-        $t_jadwal_kerja_det->prepend($day_before);
-
-        $getData = $t_jadwal_kerja_det->filter(function ($item) use ($now) {
-                return $now->between(Carbon::parse($item['start_work']), Carbon::parse($item['end_work']));
-        })->first();
-        
-        if($getData){
-            $data = [
-                'status' => "WORKING HOURS",
-                'start_work' => $getData['start_work'],
-                'end_work' => $getData['end_work'],
-                'day' => $getData['t_jadwal_kerja_det_hari']['day'],
-                'jadwal_kerja' => $getData['t_jadwal_kerja'],
+            $day_before = [
+                "start_work" => Carbon::parse($startDayBeforeWeekend)->subWeek()->toDateTimeString(),
+                "end_work" => Carbon::parse($EndDayBeforeWeekend)->subWeek()->toDateTimeString(),
             ];
-        }else{
-            $data = [
-                'status' => "NOT WORKING HOURS" 
+
+            $t_jadwal_kerja_det->prepend($day_before);
+
+            $getData = $t_jadwal_kerja_det->filter(function ($item) use ($now) {
+                return $now->between(Carbon::parse($item['start_work']), Carbon::parse($item['end_work']));
+            })->first();
+            
+            if($getData){
+                $data = [
+                    'status' => "WORKING HOURS",
+                    'start_work' => $getData['start_work'],
+                    'end_work' => $getData['end_work'],
+                    'day' => @$getData['t_jadwal_kerja_det_hari']['day'],
+                    'jadwal_kerja' => @$getData['t_jadwal_kerja'],
+                ];
+            }else{
+                $data = [
+                    'status' => "NOT WORKING HOURS" 
+                ];
+            }
+            return $data;
+        } catch (\Exception $e) {
+            return [
+                'status' => "NOT WORKING HOURS"
             ];
         }
-        return $data;
     }
 
 
