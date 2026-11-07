@@ -1,0 +1,2 @@
+<?php
+ // blade php file
